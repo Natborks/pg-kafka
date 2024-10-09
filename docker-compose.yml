@@ -1,0 +1,115 @@
+version: '3'
+
+services:
+  mongo_db:
+    image: mongo:5.0.2
+    restart: unless-stopped
+    env_file: ./.env
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=$MONGO_ROOT_USERNAME
+      - MONGO_INITDB_ROOT_PASSWORD=$MONGO_ROOT_PASSWORD
+      - MONGO_INITDB_DATABASE=$MONGO_DB
+      - MONGO_DB_USERNAME=$MONGODB_USERNAME
+      - MONGO_DB_PASSWORD=$MONGODB_PASSWORD
+    ports:
+      - "27017:27017"
+    volumes:
+      - db:/data/db
+    networks:
+      - mongodb-school
+    command: ["--bind_ip", "0.0.0.0"]
+
+  school:
+    depends_on:
+      - mongo_db
+    build: ./school
+    restart: on-failure
+    env_file: ./.env
+    ports:
+      - "6262:8081"
+    environment:
+      SPRING_APPLICATION_JSON: '{
+          "spring.data.mongodb.uri" : "mongodb://$MONGODB_USERNAME:$MONGODB_PASSWORD@mongo_db:$MONGODB_DOCKER_PORT/$MONGODB_DATABASE?authSource=admin&authMechanism=SCRAM-SHA-1",
+          "spring.data.mongodb.authentication-database":"admin"
+        }'
+    volumes:
+      - .m2:/root/.m2
+    stdin_open: true
+    tty: true
+    networks:
+      - mongodb-school
+
+  postgres:
+    image: postgres
+    environment:
+        - POSTGRES_USER=$POSTGRES_USER
+        - POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+        - POSTGRES_DB=$POSTGRES_DB
+    ports:
+      - "5431:5432"
+    networks:
+      - postgres-producer
+      - postgres-consumer
+
+  producer:
+    build:
+      context: ./producer
+      dockerfile: ./Dockerfile
+    restart: on-failure
+    ports:
+      - "8080:8082"
+    environment:
+      - POSTGRES_USER=$POSTGRES_USER
+      - POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/$POSTGRES_DB
+      - SPRING_DATASOURCE_USERNAME=$POSTGRES_USER
+      - SPRING_DATASOURCE_PASSWORD=$POSTGRES_PASSWORD
+      - SPRING_JPA_HIBERNATE_DDL_AUTO=update
+    depends_on:
+      - postgres
+    networks:
+      - postgres-producer
+
+  consumer:
+    build:
+      context: ./consumer
+      dockerfile: ./Dockerfile
+    restart: on-failure
+    ports:
+      - "8083:8083"
+    environment:
+      - POSTGRES_USER=$POSTGRES_USER
+      - POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/$POSTGRES_DB
+      - SPRING_DATASOURCE_USERNAME=$POSTGRES_USER
+      - SPRING_DATASOURCE_PASSWORD=$POSTGRES_PASSWORD
+      - SPRING_JPA_HIBERNATE_DDL_AUTO=update
+    depends_on:
+      - postgres
+    networks:
+      - postgres-consumer
+      - consumer-demo
+
+  demo:
+    build:
+      context: ./demo
+      dockerfile: ./Dockerfile
+    restart: on-failure
+    ports:
+      - "8084:8084"
+
+    depends_on:
+      - consumer
+    networks:
+      - postgres-consumer
+      - consumer-demo
+
+
+networks:
+  postgres-producer:
+  mongodb-school:
+  postgres-consumer:
+  consumer-demo:
+
+volumes:
+  db:
